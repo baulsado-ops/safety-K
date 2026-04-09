@@ -194,7 +194,7 @@
     const loader = document.getElementById("loader");
     const errorBox = document.getElementById("error");
     const resultBox = document.getElementById("result");
-    const MAX_UPLOAD_MB = 4;
+    const MAX_UPLOAD_MB = {{ max_upload_mb|default(12)|int }};
 
     imageInput.addEventListener("change", () => {
       const file = imageInput.files?.[0];

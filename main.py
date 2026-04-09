@@ -13,7 +13,8 @@ from vision_risk import CvRiskSummary, analyze_cv
 load_dotenv()
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "4")) * 1024 * 1024
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "12"))
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 SYSTEM_PROMPT = """
@@ -149,13 +150,13 @@ def analyze_with_openai(image_data_url: str, extra_context: str, cv: CvRiskSumma
 
 @app.errorhandler(RequestEntityTooLarge)
 def handle_too_large(_: RequestEntityTooLarge):
-    max_mb = int(os.getenv("MAX_UPLOAD_MB", "4"))
+    max_mb = MAX_UPLOAD_MB
     return jsonify({"error": f"업로드 파일이 너무 큽니다. {max_mb}MB 이하 이미지로 다시 시도해주세요."}), 413
 
 
 @app.get("/")
 def home() -> str:
-    return render_template("index.html")
+    return render_template("index.html", max_upload_mb=MAX_UPLOAD_MB)
 
 
 @app.post("/api/analyze")
