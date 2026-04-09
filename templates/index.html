@@ -195,8 +195,8 @@
     const errorBox = document.getElementById("error");
     const resultBox = document.getElementById("result");
     const MAX_UPLOAD_MB = {{ max_upload_mb|default(12)|int }};
-    const VERCEL_SAFE_MB = 3.8;
-    const TARGET_MAX_DIMENSION = 1600;
+    const VERCEL_SAFE_MB = 2.5;
+    const TARGET_MAX_DIMENSION = 1280;
     let uploadFile = null;
 
     async function fileToImage(file) {
@@ -223,33 +223,35 @@
 
     async function compressImageForUpload(file) {
       const img = await fileToImage(file);
-      const scale = Math.min(1, TARGET_MAX_DIMENSION / Math.max(img.width, img.height));
-      const width = Math.max(1, Math.round(img.width * scale));
-      const height = Math.max(1, Math.round(img.height * scale));
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, width, height);
-
-      let quality = 0.9;
-      let blob = await canvasToBlob(canvas, quality);
       const limitBytes = Math.floor(VERCEL_SAFE_MB * 1024 * 1024);
+      let maxDim = TARGET_MAX_DIMENSION;
+      let blob = null;
 
-      while (blob && blob.size > limitBytes && quality > 0.45) {
-        quality -= 0.1;
-        blob = await canvasToBlob(canvas, quality);
+      for (let pass = 0; pass < 4; pass += 1) {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        for (let quality = 0.85; quality >= 0.35; quality -= 0.1) {
+          blob = await canvasToBlob(canvas, quality);
+          if (blob && blob.size <= limitBytes) {
+            return new File([blob], "upload.jpg", { type: "image/jpeg" });
+          }
+        }
+
+        maxDim = Math.round(maxDim * 0.8);
       }
 
       if (!blob) {
         throw new Error("이미지 압축에 실패했습니다.");
       }
-      if (blob.size > limitBytes) {
-        throw new Error("이미지가 너무 커서 압축 후에도 업로드할 수 없습니다. 더 작은 이미지를 사용해주세요.");
-      }
-
-      return new File([blob], "upload.jpg", { type: "image/jpeg" });
+      throw new Error("이미지가 너무 커서 압축 후에도 업로드할 수 없습니다. 원본 해상도를 더 낮춰주세요.");
     }
 
     imageInput.addEventListener("change", async () => {
@@ -300,18 +302,27 @@
     runBtn.addEventListener("click", async () => {
       errorBox.textContent = "";
       resultBox.style.display = "none";
-      const file = uploadFile || imageInput.files?.[0];
-      if (!file) {
+      const sourceFile = imageInput.files?.[0];
+      if (!sourceFile) {
         errorBox.textContent = "사진을 먼저 업로드해주세요.";
         return;
       }
-      if (file.size > VERCEL_SAFE_MB * 1024 * 1024) {
+
+      let finalUpload = sourceFile;
+      try {
+        finalUpload = await compressImageForUpload(sourceFile);
+        uploadFile = finalUpload;
+      } catch (err) {
+        errorBox.textContent = String(err.message || err);
+        return;
+      }
+      if (finalUpload.size > VERCEL_SAFE_MB * 1024 * 1024) {
         errorBox.textContent = `전송 파일이 너무 큽니다. ${VERCEL_SAFE_MB}MB 이하 이미지로 다시 시도해주세요.`;
         return;
       }
 
       const form = new FormData();
-      form.append("image", file, file.name || "upload.jpg");
+      form.append("image", finalUpload, finalUpload.name || "upload.jpg");
       form.append("extra_context", document.getElementById("extra").value || "");
 
       runBtn.disabled = true;
