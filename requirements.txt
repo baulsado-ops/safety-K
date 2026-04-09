@@ -3,3 +3,4 @@ openai>=1.75.0
 python-dotenv>=1.0.1
 pydantic>=2.7.0
 pillow>=10.4.0
+flask>=3.0.0

@@ -1,0 +1,289 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>현장 위험성 체크리스트 생성기</title>
+  <style>
+    :root {
+      --bg: #fff6ea;
+      --panel: #fffdf8;
+      --ink: #1f2428;
+      --sub: #6a737d;
+      --accent: #c2410c;
+      --accent2: #ea580c;
+      --ok: #15803d;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --line: #fed7aa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Pretendard", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 90% 0%, #ffdcb7 0, transparent 35%),
+        radial-gradient(circle at 0% 80%, #ffedd5 0, transparent 40%),
+        var(--bg);
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 20px 72px;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.6rem, 3vw, 2.3rem);
+      letter-spacing: -0.03em;
+    }
+    .sub {
+      color: var(--sub);
+      margin-top: 10px;
+      margin-bottom: 26px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 10px 28px rgba(194, 65, 12, 0.08);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    @media (min-width: 880px) {
+      .grid { grid-template-columns: 1.2fr .8fr; }
+    }
+    input, textarea, button {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid #fdba74;
+      padding: 11px 12px;
+      font: inherit;
+      background: white;
+    }
+    textarea { min-height: 92px; resize: vertical; }
+    button {
+      background: linear-gradient(120deg, var(--accent), var(--accent2));
+      color: white;
+      border: 0;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform .15s ease;
+    }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: .6; cursor: default; }
+    .preview { width: 100%; border-radius: 12px; margin-top: 8px; display: none; }
+    .result { margin-top: 18px; display: none; }
+    .score {
+      border-radius: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      margin-bottom: 14px;
+    }
+    .score .n { font-size: 2.1rem; font-weight: 800; letter-spacing: -0.03em; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #ffedd5;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px;
+      border-bottom: 1px solid #ffedd5;
+      vertical-align: top;
+      font-size: .92rem;
+    }
+    th { background: #fff7ed; }
+    .card {
+      border: 1px solid #ffedd5;
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+      margin-bottom: 10px;
+    }
+    .muted { color: var(--sub); }
+    .error { color: var(--danger); margin-top: 10px; white-space: pre-wrap; }
+    .loader { display: none; margin-top: 10px; color: var(--warn); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>현장 위험성 체크리스트 생성기</h1>
+    <p class="sub">제조업 사업장/건설현장 사진을 업로드하면 작업시작 전 위험도 점수, 체크리스트, 주의사항, 예방대책을 자동 생성합니다.</p>
+
+    <div class="grid panel">
+      <div>
+        <label>현장 사진 업로드</label>
+        <input id="image" type="file" accept="image/*" />
+        <img id="preview" class="preview" alt="미리보기" />
+
+        <label style="margin-top:10px; display:block;">추가 현장 정보 (선택)</label>
+        <textarea id="extra" placeholder="예: 야간작업, 용접작업 포함, 지게차 상시 운행"></textarea>
+
+        <button id="run" style="margin-top:12px;">위험성 분석 시작</button>
+        <div class="loader" id="loader">이미지를 분석하고 있습니다...</div>
+        <div class="error" id="error"></div>
+      </div>
+
+      <div>
+        <h3 style="margin-top:4px;">출력 항목</h3>
+        <ul class="muted">
+          <li>작업 시작 전 체크리스트 자동 생성</li>
+          <li>종합 위험도 점수(0~100) 및 위험등급</li>
+          <li>주요 위험요인별 주의사항</li>
+          <li>즉시 실행 가능한 예방대책/우선조치</li>
+        </ul>
+        <p class="muted">배포 환경 변수 <code>OPENAI_API_KEY</code>가 없으면 데모 분석 모드로 동작합니다.</p>
+      </div>
+    </div>
+
+    <section class="result" id="result">
+      <div class="score">
+        <div class="muted">사업장 유형</div>
+        <div id="siteType" style="font-size:1.2rem; font-weight:700;"></div>
+        <div class="muted" style="margin-top:8px;">종합 위험도</div>
+        <div class="n" id="scoreNum"></div>
+        <div id="riskLevel" style="font-weight:700;"></div>
+      </div>
+
+      <h3>현장 요약</h3>
+      <p id="summary"></p>
+
+      <h3>작업 시작 전 체크리스트</h3>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr><th>분류</th><th>점검항목</th><th>위험근거</th><th>예방대책</th></tr>
+          </thead>
+          <tbody id="checklist"></tbody>
+        </table>
+      </div>
+
+      <h3>주요 위험요인</h3>
+      <div id="hazards"></div>
+
+      <h3>우선 조치</h3>
+      <ol id="priority"></ol>
+
+      <h3>법적 유의사항</h3>
+      <ol id="legal"></ol>
+    </section>
+  </div>
+
+  <script>
+    const imageInput = document.getElementById("image");
+    const preview = document.getElementById("preview");
+    const runBtn = document.getElementById("run");
+    const loader = document.getElementById("loader");
+    const errorBox = document.getElementById("error");
+    const resultBox = document.getElementById("result");
+
+    imageInput.addEventListener("change", () => {
+      const file = imageInput.files?.[0];
+      if (!file) {
+        preview.style.display = "none";
+        return;
+      }
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = "block";
+    });
+
+    function scoreColor(score) {
+      if (score >= 80) return "#b91c1c";
+      if (score >= 60) return "#c2410c";
+      if (score >= 40) return "#b45309";
+      return "#15803d";
+    }
+
+    function fillList(targetId, values) {
+      const el = document.getElementById(targetId);
+      el.innerHTML = "";
+      (values || []).forEach((v) => {
+        const li = document.createElement("li");
+        li.textContent = v;
+        el.appendChild(li);
+      });
+    }
+
+    runBtn.addEventListener("click", async () => {
+      errorBox.textContent = "";
+      resultBox.style.display = "none";
+      const file = imageInput.files?.[0];
+      if (!file) {
+        errorBox.textContent = "사진을 먼저 업로드해주세요.";
+        return;
+      }
+
+      const form = new FormData();
+      form.append("image", file);
+      form.append("extra_context", document.getElementById("extra").value || "");
+
+      runBtn.disabled = true;
+      loader.style.display = "block";
+
+      try {
+        const res = await fetch("/api/analyze", { method: "POST", body: form });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "분석에 실패했습니다.");
+
+        document.getElementById("siteType").textContent = data.site_type || "unknown";
+
+        const score = Number(data.overall_risk_score || 0);
+        const scoreEl = document.getElementById("scoreNum");
+        scoreEl.textContent = `${score} / 100`;
+        scoreEl.style.color = scoreColor(score);
+
+        document.getElementById("riskLevel").textContent = `위험등급: ${data.risk_level || "보통"}`;
+        document.getElementById("summary").textContent = data.summary || "";
+
+        const checklist = document.getElementById("checklist");
+        checklist.innerHTML = "";
+        (data.checklist || []).forEach((item) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${item.category || "기타"}</td>
+            <td>${item.item || "-"}</td>
+            <td>${item.why || "-"}</td>
+            <td>${item.action || "-"}</td>
+          `;
+          checklist.appendChild(tr);
+        });
+
+        const hazards = document.getElementById("hazards");
+        hazards.innerHTML = "";
+        (data.hazards || []).forEach((h) => {
+          const div = document.createElement("div");
+          div.className = "card";
+          div.innerHTML = `
+            <strong>${h.title || "-"}</strong><br>
+            <span class="muted">위험도(5x5): S ${h.severity || "-"} x L ${h.likelihood || "-"} = R ${h.risk_score || "-"}</span>
+            <p><b>주의사항:</b> ${h.warning || "-"}</p>
+            <p><b>예방대책:</b> ${h.prevention || "-"}</p>
+          `;
+          hazards.appendChild(div);
+        });
+
+        fillList("priority", data.priority_actions);
+        fillList("legal", data.legal_notes);
+
+        resultBox.style.display = "block";
+        resultBox.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (err) {
+        errorBox.textContent = String(err.message || err);
+      } finally {
+        runBtn.disabled = false;
+        loader.style.display = "none";
+      }
+    });
+  </script>
+</body>
+</html>
