@@ -6,18 +6,20 @@ from typing import Any
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 from openai import OpenAI
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from vision_risk import CvRiskSummary, analyze_cv
 
 load_dotenv()
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "4")) * 1024 * 1024
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 SYSTEM_PROMPT = """
-당신은 대한민국 제조업/건설현장 산업안전 전문 컨설턴트입니다.
-입력 이미지를 보고 작업 시작 전(TBM/작업전 안전점검) 관점으로 위험요인을 분석하세요.
-반드시 JSON만 출력하세요. 설명 문장, 마크다운, 코드블록을 출력하면 안 됩니다.
+당신은 대한민국 제조업/건설현장 작업전 위험성평가 전문가입니다.
+입력 이미지와 CV 사전분석 결과를 종합해 JSON만 출력하세요.
+마크다운/코드블록/설명문을 출력하면 안 됩니다.
 
 출력 스키마:
 {
@@ -45,13 +47,13 @@ SYSTEM_PROMPT = """
     }
   ],
   "priority_actions": ["즉시 실행 우선조치"],
-  "legal_notes": ["적용 가능한 일반 안전수칙/법적 유의사항(구체 조문 번호 단정 금지)"]
+  "legal_notes": ["적용 가능한 일반 안전수칙/법적 유의사항"]
 }
 
 규칙:
-- checklist는 최소 10개 이상, hazards는 최소 5개 이상 작성.
-- 사진에서 명확하지 않은 내용은 추정이라고 명시하거나 보수적으로 작성.
-- 한국어로 작성.
+- checklist 최소 10개 이상, hazards 최소 5개 이상
+- 불확실한 내용은 추정으로 표기
+- 한국어로 작성
 """.strip()
 
 
@@ -64,20 +66,17 @@ def parse_json(text: str) -> dict[str, Any]:
 
 
 def _rule_based_payload(cv: CvRiskSummary) -> dict[str, Any]:
-    score = cv.overall_risk_score
-    level = cv.risk_level
-
     return {
         "site_type": "unknown",
-        "overall_risk_score": score,
-        "risk_level": level,
+        "overall_risk_score": cv.overall_risk_score,
+        "risk_level": cv.risk_level,
         "summary": cv.summary,
         "checklist": cv.checklist,
         "hazards": cv.hazards,
         "priority_actions": cv.priority_actions,
         "legal_notes": [
             "산업안전보건법 및 관련 고시에 따른 기본 안전조치 준수 필요",
-            "구체 법조문 적용은 업종/공정별 안전관리자 검토가 필요",
+            "구체 법조문 적용은 업종/공정별 안전관리자 검토 필요",
         ],
         "cv_meta": {
             "enabled": cv.enabled,
@@ -94,7 +93,6 @@ def analyze_with_openai(image_data_url: str, extra_context: str, cv: CvRiskSumma
         return _rule_based_payload(cv)
 
     client = OpenAI(api_key=api_key)
-
     cv_hint = {
         "cv_engine": cv.engine,
         "cv_enabled": cv.enabled,
@@ -141,13 +139,18 @@ def analyze_with_openai(image_data_url: str, extra_context: str, cv: CvRiskSumma
         data["hazards"] = cv.hazards
     if not data.get("priority_actions"):
         data["priority_actions"] = cv.priority_actions
-
     if "overall_risk_score" not in data:
         data["overall_risk_score"] = cv.overall_risk_score
     if "risk_level" not in data:
         data["risk_level"] = cv.risk_level
 
     return data
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_too_large(_: RequestEntityTooLarge):
+    max_mb = int(os.getenv("MAX_UPLOAD_MB", "4"))
+    return jsonify({"error": f"업로드 파일이 너무 큽니다. {max_mb}MB 이하 이미지로 다시 시도해주세요."}), 413
 
 
 @app.get("/")

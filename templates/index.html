@@ -194,6 +194,7 @@
     const loader = document.getElementById("loader");
     const errorBox = document.getElementById("error");
     const resultBox = document.getElementById("result");
+    const MAX_UPLOAD_MB = 4;
 
     imageInput.addEventListener("change", () => {
       const file = imageInput.files?.[0];
@@ -201,6 +202,13 @@
         preview.style.display = "none";
         return;
       }
+      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+        errorBox.textContent = `파일 용량이 너무 큽니다. ${MAX_UPLOAD_MB}MB 이하 이미지를 업로드해주세요.`;
+        imageInput.value = "";
+        preview.style.display = "none";
+        return;
+      }
+      errorBox.textContent = "";
       preview.src = URL.createObjectURL(file);
       preview.style.display = "block";
     });
@@ -230,6 +238,10 @@
         errorBox.textContent = "사진을 먼저 업로드해주세요.";
         return;
       }
+      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+        errorBox.textContent = `파일 용량이 너무 큽니다. ${MAX_UPLOAD_MB}MB 이하 이미지를 업로드해주세요.`;
+        return;
+      }
 
       const form = new FormData();
       form.append("image", file);
@@ -240,8 +252,16 @@
 
       try {
         const res = await fetch("/api/analyze", { method: "POST", body: form });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "분석에 실패했습니다.");
+        const rawText = await res.text();
+        let data = null;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          data = { error: rawText };
+        }
+        if (!res.ok) {
+          throw new Error(data.error || `요청 실패 (HTTP ${res.status})`);
+        }
 
         document.getElementById("siteType").textContent = data.site_type || "unknown";
 
