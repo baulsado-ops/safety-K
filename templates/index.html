@@ -176,6 +176,14 @@
 
       <h3>법적 유의사항</h3>
       <ol id="legal"></ol>
+
+      <h3>객체 인식(CV) 결과</h3>
+      <p class="muted" id="cvStatus"></p>
+      <div class="card">
+        <div><b>엔진</b>: <span id="cvEngine">-</span></div>
+        <div><b>요약 카운트</b>: <span id="cvCounts">-</span></div>
+      </div>
+      <div id="cvDetections"></div>
     </section>
   </div>
 
@@ -274,6 +282,27 @@
 
         fillList("priority", data.priority_actions);
         fillList("legal", data.legal_notes);
+
+        const cvMeta = data.cv_meta || {};
+        document.getElementById("cvStatus").textContent = cvMeta.enabled
+          ? "객체 인식 라이브러리 기반 분석이 적용되었습니다."
+          : "객체 인식 라이브러리를 사용할 수 없어 규칙/LLM 기반 결과만 표시합니다.";
+        document.getElementById("cvEngine").textContent = cvMeta.engine || "unavailable";
+
+        const counts = cvMeta.counts || {};
+        const countText = Object.keys(counts).length
+          ? Object.entries(counts).map(([k, v]) => `${k}:${v}`).join(", ")
+          : "-";
+        document.getElementById("cvCounts").textContent = countText;
+
+        const cvDetections = document.getElementById("cvDetections");
+        cvDetections.innerHTML = "";
+        (cvMeta.detections || []).slice(0, 20).forEach((d) => {
+          const div = document.createElement("div");
+          div.className = "card";
+          div.innerHTML = `<b>${d.label}</b> (conf: ${d.confidence})`;
+          cvDetections.appendChild(div);
+        });
 
         resultBox.style.display = "block";
         resultBox.scrollIntoView({ behavior: "smooth", block: "start" });
