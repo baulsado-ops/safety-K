@@ -19,14 +19,15 @@ DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 SYSTEM_PROMPT = """
 You are a Korean EHS specialist for manufacturing plants and construction sites.
-Analyze the given image and return JSON only (no markdown).
+Analyze the image and return JSON only (no markdown, no extra text).
+Write all user-facing text fields in Korean.
 
 Output schema:
 {
   "site_type": "manufacturing | construction | unknown",
   "overall_risk_score": 0-100 integer,
   "risk_level": "낮음 | 보통 | 높음 | 매우높음",
-  "summary": "한국어 요약 문단",
+  "summary": "한국어 요약",
   "checklist": [
     {
       "category": "PPE | 전기 | 화재폭발 | 중장비 | 추락낙하 | 협착끼임 | 화학물질 | 정리정돈 | 기타",
@@ -51,10 +52,10 @@ Output schema:
 }
 
 Rules:
-- Write in Korean.
-- checklist >= 10, hazards >= 5.
-- If uncertain, explicitly mark as estimate.
-- Infer site_type from visual cues whenever possible.
+- checklist length must be at least 10.
+- hazards length must be at least 5.
+- Infer site_type from visible cues whenever possible.
+- If uncertain, explicitly mark assumptions.
 """.strip()
 
 
@@ -98,6 +99,47 @@ def _base_payload(cv: CvRiskSummary, message: str | None = None) -> dict[str, An
     }
 
 
+def _infer_site_type(merged: dict[str, Any], cv: CvRiskSummary) -> str:
+    site_type = str(merged.get("site_type", "unknown")).lower().strip()
+    if site_type in {"manufacturing", "construction"}:
+        return site_type
+
+    text_parts: list[str] = []
+    text_parts.append(str(merged.get("summary", "")))
+
+    for hz in merged.get("hazards", []) or []:
+        text_parts.append(str(hz.get("title", "")))
+        text_parts.append(str(hz.get("warning", "")))
+
+    for ck in merged.get("checklist", []) or []:
+        text_parts.append(str(ck.get("item", "")))
+
+    text = " ".join(text_parts).lower()
+
+    construction_keywords = [
+        "construction", "건설", "비계", "scaffold", "crane", "excavator", "ladder", "굴착", "거푸집", "타워크레인",
+    ]
+    manufacturing_keywords = [
+        "manufacturing", "factory", "plant", "공장", "제조", "생산", "라인", "conveyor", "press", "cnc", "assembly",
+    ]
+
+    c_score = sum(1 for kw in construction_keywords if kw in text)
+    m_score = sum(1 for kw in manufacturing_keywords if kw in text)
+
+    # CV counts hint: machinery/height tends to construction, but machine-only indoor can be manufacturing.
+    machinery = int((cv.counts or {}).get("machinery", 0))
+    height = int((cv.counts or {}).get("height", 0))
+    if height > 0:
+        c_score += 2
+    if machinery > 0:
+        c_score += 1
+        m_score += 1
+
+    if c_score == 0 and m_score == 0:
+        return "unknown"
+    return "construction" if c_score >= m_score else "manufacturing"
+
+
 def _normalize_result(data: dict[str, Any], cv: CvRiskSummary) -> dict[str, Any]:
     merged = dict(data or {})
 
@@ -114,7 +156,7 @@ def _normalize_result(data: dict[str, Any], cv: CvRiskSummary) -> dict[str, Any]
         ],
     )
 
-    if not merged.get("overall_risk_score") and merged.get("overall_risk_score") != 0:
+    if merged.get("overall_risk_score") is None:
         merged["overall_risk_score"] = cv.overall_risk_score
 
     try:
@@ -123,6 +165,7 @@ def _normalize_result(data: dict[str, Any], cv: CvRiskSummary) -> dict[str, Any]
         merged["overall_risk_score"] = cv.overall_risk_score
 
     merged["risk_level"] = merged.get("risk_level") or risk_level_from_score(merged["overall_risk_score"])
+    merged["site_type"] = _infer_site_type(merged, cv)
 
     merged["cv_meta"] = {
         "enabled": cv.enabled,
@@ -137,7 +180,7 @@ def _normalize_result(data: dict[str, Any], cv: CvRiskSummary) -> dict[str, Any]
 def analyze_with_openai(image_data_url: str, extra_context: str, cv: CvRiskSummary) -> dict[str, Any]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return _base_payload(cv, "OPENAI_API_KEY 미설정으로 CV/규칙 기반 평가를 표시합니다.")
+        return _normalize_result(_base_payload(cv, "OPENAI_API_KEY 미설정으로 CV/규칙 기반 평가를 표시합니다."), cv)
 
     client = OpenAI(api_key=api_key)
     cv_hint = {
