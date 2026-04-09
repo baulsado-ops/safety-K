@@ -195,22 +195,89 @@
     const errorBox = document.getElementById("error");
     const resultBox = document.getElementById("result");
     const MAX_UPLOAD_MB = {{ max_upload_mb|default(12)|int }};
+    const VERCEL_SAFE_MB = 3.8;
+    const TARGET_MAX_DIMENSION = 1600;
+    let uploadFile = null;
 
-    imageInput.addEventListener("change", () => {
+    async function fileToImage(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          resolve(img);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error("이미지 로딩에 실패했습니다."));
+        };
+        img.src = url;
+      });
+    }
+
+    async function canvasToBlob(canvas, quality) {
+      return new Promise((resolve) => {
+        canvas.toBlob((blob) => resolve(blob), "image/jpeg", quality);
+      });
+    }
+
+    async function compressImageForUpload(file) {
+      const img = await fileToImage(file);
+      const scale = Math.min(1, TARGET_MAX_DIMENSION / Math.max(img.width, img.height));
+      const width = Math.max(1, Math.round(img.width * scale));
+      const height = Math.max(1, Math.round(img.height * scale));
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+
+      let quality = 0.9;
+      let blob = await canvasToBlob(canvas, quality);
+      const limitBytes = Math.floor(VERCEL_SAFE_MB * 1024 * 1024);
+
+      while (blob && blob.size > limitBytes && quality > 0.45) {
+        quality -= 0.1;
+        blob = await canvasToBlob(canvas, quality);
+      }
+
+      if (!blob) {
+        throw new Error("이미지 압축에 실패했습니다.");
+      }
+      if (blob.size > limitBytes) {
+        throw new Error("이미지가 너무 커서 압축 후에도 업로드할 수 없습니다. 더 작은 이미지를 사용해주세요.");
+      }
+
+      return new File([blob], "upload.jpg", { type: "image/jpeg" });
+    }
+
+    imageInput.addEventListener("change", async () => {
       const file = imageInput.files?.[0];
       if (!file) {
         preview.style.display = "none";
+        uploadFile = null;
         return;
       }
       if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
         errorBox.textContent = `파일 용량이 너무 큽니다. ${MAX_UPLOAD_MB}MB 이하 이미지를 업로드해주세요.`;
         imageInput.value = "";
         preview.style.display = "none";
+        uploadFile = null;
         return;
       }
-      errorBox.textContent = "";
-      preview.src = URL.createObjectURL(file);
-      preview.style.display = "block";
+      try {
+        errorBox.textContent = "이미지 압축 중입니다...";
+        uploadFile = await compressImageForUpload(file);
+        preview.src = URL.createObjectURL(uploadFile);
+        preview.style.display = "block";
+        errorBox.textContent = `업로드용으로 자동 압축 완료 (${(uploadFile.size / 1024 / 1024).toFixed(2)}MB)`;
+      } catch (err) {
+        errorBox.textContent = String(err.message || err);
+        imageInput.value = "";
+        preview.style.display = "none";
+        uploadFile = null;
+      }
     });
 
     function scoreColor(score) {
@@ -233,18 +300,18 @@
     runBtn.addEventListener("click", async () => {
       errorBox.textContent = "";
       resultBox.style.display = "none";
-      const file = imageInput.files?.[0];
+      const file = uploadFile || imageInput.files?.[0];
       if (!file) {
         errorBox.textContent = "사진을 먼저 업로드해주세요.";
         return;
       }
-      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
-        errorBox.textContent = `파일 용량이 너무 큽니다. ${MAX_UPLOAD_MB}MB 이하 이미지를 업로드해주세요.`;
+      if (file.size > VERCEL_SAFE_MB * 1024 * 1024) {
+        errorBox.textContent = `전송 파일이 너무 큽니다. ${VERCEL_SAFE_MB}MB 이하 이미지로 다시 시도해주세요.`;
         return;
       }
 
       const form = new FormData();
-      form.append("image", file);
+      form.append("image", file, file.name || "upload.jpg");
       form.append("extra_context", document.getElementById("extra").value || "");
 
       runBtn.disabled = true;
