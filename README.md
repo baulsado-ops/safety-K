@@ -22,6 +22,8 @@
 
 `OPENAI_API_KEY`가 없으면 데모 분석 결과를 반환합니다.
 
+참고: Vercel Serverless 환경에서는 `ultralytics/opencv` 추론이 제한될 수 있습니다. 이 경우 앱은 자동으로 일반 위험성 체크리스트 기준(보수적 점수)으로 폴백합니다.
+
 ## 로컬 실행 (Flask)
 
 ```bash

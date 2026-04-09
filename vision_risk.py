@@ -256,6 +256,17 @@ def _score_and_actions(counts: dict[str, int]) -> tuple[int, list[dict[str, Any]
 
 
 def analyze_cv(image_bytes: bytes) -> CvRiskSummary:
+    fallback_counts = {
+        "person": 1,
+        "helmet": 0,
+        "vest": 0,
+        "machinery": 0,
+        "height": 0,
+        "fire": 0,
+        "electrical": 0,
+    }
+    fb_score, fb_hazards, fb_actions, fb_checklist, fb_summary = _score_and_actions(fallback_counts)
+
     try:
         import cv2
         import numpy as np
@@ -265,13 +276,16 @@ def analyze_cv(image_bytes: bytes) -> CvRiskSummary:
             enabled=False,
             engine="unavailable",
             detections=[],
-            counts={},
-            overall_risk_score=0,
-            risk_level="보통",
-            summary="CV 라이브러리(ultralytics/opencv)가 설치되지 않아 객체 인식 기반 분석을 수행하지 못했습니다.",
-            checklist=[],
-            hazards=[],
-            priority_actions=[],
+            counts=fallback_counts,
+            overall_risk_score=max(45, fb_score),
+            risk_level=_risk_level(max(45, fb_score)),
+            summary=(
+                "CV 라이브러리(ultralytics/opencv)를 사용할 수 없어 일반 작업 착수 위험 기준으로 평가했습니다. "
+                + fb_summary
+            ),
+            checklist=fb_checklist,
+            hazards=fb_hazards,
+            priority_actions=fb_actions,
         )
 
     model_name = os.getenv("VISION_MODEL", "yolov8s-worldv2.pt")
@@ -335,11 +349,11 @@ def analyze_cv(image_bytes: bytes) -> CvRiskSummary:
             enabled=False,
             engine=f"error:{model_name}",
             detections=[],
-            counts={},
-            overall_risk_score=0,
-            risk_level="보통",
-            summary=f"객체 인식 분석 실패: {exc}",
-            checklist=[],
-            hazards=[],
-            priority_actions=[],
+            counts=fallback_counts,
+            overall_risk_score=max(45, fb_score),
+            risk_level=_risk_level(max(45, fb_score)),
+            summary=f"객체 인식 분석 실패({exc})로 일반 작업 착수 위험 기준으로 평가했습니다. {fb_summary}",
+            checklist=fb_checklist,
+            hazards=fb_hazards,
+            priority_actions=fb_actions,
         )
